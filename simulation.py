@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.integrate import odeint
+from scipy.optimize import minimize
 from constants import M_TOTAL
 from physics import PhysicsModel
 
@@ -59,3 +60,52 @@ class BalloonSimulation:
         :return: Результат численного решения.
         """
         return odeint(self.equations, initial_conditions, t)
+
+    def inverse_problem(self, observed_trajectory, initial_guess, time_span, dt):
+        """
+        Решение обратной задачи: подбор параметров модели для минимизации ошибки между
+        наблюдаемой и симулированной траекториями.
+
+        :param observed_trajectory: Наблюдаемая траектория {'x': [...], 'y': [...], 'z': [...]}
+        :param initial_guess: Начальные предположения для параметров.
+        :param time_span: Временной интервал в формате (t0, tf).
+        :param dt: Шаг интегрирования.
+        :return: Оптимизированные параметры.
+        """
+        def cost_function(params):
+            # Установка новых параметров в модель
+            self.physics_model.update_parameters(params)
+
+            # Запуск симуляции с текущими параметрами
+            initial_conditions = [0, 0, 0, 0, 0, 0]  # Начальные условия
+            t, simulated_trajectory = self.runge_kutta_5(self.equations, initial_conditions, time_span, dt)
+
+            # Интерполяция для сравнения траекторий
+            simulated_x = simulated_trajectory[:, 0]
+            simulated_y = simulated_trajectory[:, 1]
+            simulated_z = simulated_trajectory[:, 2]
+
+            observed_x = observed_trajectory['x']
+            observed_y = observed_trajectory['y']
+            observed_z = observed_trajectory['z']
+
+            # Выравниваем размеры массивов с помощью интерполяции
+            min_len = min(len(observed_x), len(simulated_x))
+            observed_x = np.interp(np.linspace(0, 1, min_len), np.linspace(0, 1, len(observed_x)), observed_x)
+            observed_y = np.interp(np.linspace(0, 1, min_len), np.linspace(0, 1, len(observed_y)), observed_y)
+            observed_z = np.interp(np.linspace(0, 1, min_len), np.linspace(0, 1, len(observed_z)), observed_z)
+            simulated_x = simulated_x[:min_len]
+            simulated_y = simulated_y[:min_len]
+            simulated_z = simulated_z[:min_len]
+
+            # Сумма квадратов отклонений
+            error = np.sum((simulated_x - observed_x) ** 2 +
+                           (simulated_y - observed_y) ** 2 +
+                           (simulated_z - observed_z) ** 2)
+
+            return error
+
+        # Оптимизация с использованием метода 'Nelder-Mead'
+        result = minimize(cost_function, initial_guess, method='Nelder-Mead')
+
+        return result.x  # Возвращаем оптимальные параметры

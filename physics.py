@@ -14,6 +14,13 @@ class PhysicsModel:
         self.B = B  # Коэффициент модели атмосферы
         self.A = A  # Градиент температуры
 
+    def update_parameters(self, params):
+        """
+        Обновляет параметры модели на основе переданных значений.
+        :param params: Список параметров [C_D, AREA, VOLUME, ...].
+        """
+        self.C_D, self.AREA, self.VOLUME, self.M_TOTAL = params
+
     def air_density(self, h):
         """
         Рассчитывает плотность воздуха на заданной высоте.
