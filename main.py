@@ -1,16 +1,21 @@
 import numpy as np
-from simulation import run_simulation
-from visualization import plot_trajectory
+from physics import PhysicsModel
+from simulation import BalloonSimulation
+from visualization import TrajectoryPlotter
 
-# Начальные условия
-x0, vx0, y0, vy0, z0, vz0 = 0, 0, 0, 0, 0, 0
-initial_conditions = np.array([x0, y0, z0, vx0, vy0, vz0])
+# Создание объектов моделей
+physics_model = PhysicsModel()
+simulation = BalloonSimulation()
+plotter = TrajectoryPlotter()
 
-# Временной интервал
-t = np.linspace(0, 3600, 1000)
+# Начальные условия и параметры
+initial_conditions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)  # x, y, z, vx, vy, vz
+time_span = (0, 3600)  # Время в секундах (от 0 до 1 часа)
+dt = 0.1  # Шаг интегрирования
 
-# Запуск симуляции
-solution = run_simulation(initial_conditions, t)
+# Запуск симуляции методом Рунге-Кутта
+t, solution_rk5 = simulation.runge_kutta_5(simulation.equations, initial_conditions, time_span, dt)
 
-# Визуализация
-plot_trajectory(solution, t)
+
+# Построение траекторий
+plotter.plot_trajectory(solution_rk5, t, labels=['X (м)', 'Y (м)', 'Высота (м)'])
