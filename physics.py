@@ -1,28 +1,46 @@
 import numpy as np
 
-from constants import G, C_D, AREA, VOLUME, M_TOTAL
-from environment import air_density, wind_profile
+from constants import G, C_D, AREA, VOLUME, M_TOTAL, T0, RHO_0, B, A
 
-def forces(h, v, vx, vy, vz, t):
+
+def air_density(h):
+    """Модель изменения плотности воздуха с высотой."""
+    return RHO_0 * np.exp((-B * h * T0) / (T0 - A * h))
+
+
+def wind_profile(h, t):
+    """Модель ветра."""
+    base_speed = 2 + 0.1 * np.log1p(h + 1)
+    turbulence = 0.5 * np.sin(2 * np.pi * t / 600)
+    speed = base_speed + turbulence
+
+    base_direction = 45 + 15 * np.sin(2 * np.pi * h / 10000)
+    time_variation = 10 * np.sin(2 * np.pi * t / 1800)
+    direction = base_direction + time_variation
+
+    base_azimuth = 5 * np.sin(2 * np.pi * h / 5000)
+    azimuth_turbulence = 2 * np.cos(2 * np.pi * t / 900)
+    azimuth = base_azimuth + azimuth_turbulence
+
+    wind_vx = speed * np.cos(np.radians(direction)) * np.cos(np.radians(azimuth))
+    wind_vy = speed * np.sin(np.radians(direction)) * np.cos(np.radians(azimuth))
+    wind_vz = speed * np.sin(np.radians(azimuth))
+
+    return wind_vx, wind_vy, wind_vz
+
+
+def forces(h, v, t):
     """Вычисляет силы в системе."""
     rho_air = air_density(h)
-    F_gravity = M_TOTAL * G
-    F_buoyancy = rho_air * VOLUME * G
-    F_drag_vert = 0.5 * rho_air * v ** 2 * C_D * AREA * np.sign(v)
-    F_drag_hor_x = 0.5 * rho_air * vx ** 2 * C_D * AREA * np.sign(vx)
-    F_drag_hor_y = 0.5 * rho_air * vy ** 2 * C_D * AREA * np.sign(vy)
-    F_drag_hor_z = 0.5 * rho_air * vz ** 2 * C_D * AREA * np.sign(vz)
+    F_G = np.zeros(len(v))
+    F_A = np.zeros(len(v))
+    F_G[-1] = -(M_TOTAL * G)  # сила тяжести
+    F_A[-1] = rho_air * VOLUME * G  # сила Архимеда
 
+    # Учитываем ветер
     wind_vx, wind_vy, wind_vz = wind_profile(h, t)
 
-    return {
-        "F_gravity": F_gravity,
-        "F_buoyancy": F_buoyancy,
-        "F_drag_vert": F_drag_vert,
-        "F_drag_hor_x": F_drag_hor_x,
-        "F_drag_hor_y": F_drag_hor_y,
-        "F_drag_hor_z": F_drag_hor_z,
-        "wind_vx": wind_vx,
-        "wind_vy": wind_vy,
-        "wind_vz": wind_vz,
-    }
+    # Компоненты силы сопротивления
+    F_R = 0.5 * rho_air * v ** 2 * C_D * AREA * (-np.sign(v))
+
+    return F_R + F_A + F_G

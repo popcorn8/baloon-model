@@ -1,23 +1,21 @@
 from scipy.integrate import odeint
+import numpy as np
 
 from constants import M_TOTAL
-from physics import forces
+from physics import forces, wind_profile
+
 
 def equations(y, t):
     """Уравнения движения шара."""
-    h, v, x, vx, y_pos, vy, z, vz = y
-    F = forces(h, v, vx, vy, vz, t)
+    x, y, z, vx, vy, vz = y
+    v = np.array([vx, vy, vz])
+    F = forces(z, v, t)
 
-    dvdt = (F["F_buoyancy"] - F["F_gravity"] - F["F_drag_vert"]) / M_TOTAL
-    dhdt = v
-    dvxdt = (-F["F_drag_hor_x"] / M_TOTAL) + F["wind_vx"] / 100
-    dxdt = vx
-    dvy_dt = (-F["F_drag_hor_y"] / M_TOTAL) + F["wind_vy"] / 100
-    dy_dt = vy
-    dvzdt = (-F["F_drag_hor_z"] / M_TOTAL) + F["wind_vz"] / 100
-    dzdt = vz
+    # TODO: учесть ветер
+    dvdt = F / M_TOTAL
 
-    return [dhdt, dvdt, dxdt, dvxdt, dy_dt, dvy_dt, dzdt, dvzdt]
+    return np.array([v[0], v[1], v[2], dvdt[0], dvdt[1], dvdt[2]])
+
 
 def run_simulation(initial_conditions, t):
     """Запускает симуляцию."""
