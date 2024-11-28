@@ -76,10 +76,7 @@ class PhysicsModel:
         F_A = np.zeros(len(v))
         F_A[-1] = rho_air * self.VOLUME * self.G
 
-        # Учет ветра
-        wind_vx, wind_vy, wind_vz = self.wind_profile(h, t)
-
         # Компоненты силы сопротивления
-        F_R = 0.5 * rho_air * (v - np.array([wind_vx, wind_vy, wind_vz])) ** 2 * self.C_D * self.AREA * (-np.sign(v))
+        F_R = 0.5 * rho_air * v ** 2 * self.C_D * self.AREA * (-np.sign(v))
 
         return F_R + F_A + F_G

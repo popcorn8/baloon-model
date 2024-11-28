@@ -15,7 +15,9 @@ class BalloonSimulation:
         """Дифференциальные уравнения движения."""
         x, y, z, vx, vy, vz = y
         h = z  # Высота равна текущей координате z
-        v = np.array([vx, vy, vz])  # Скорость как вектор
+        # Учет ветра
+        wind_vx, wind_vy, wind_vz = self.physics_model.wind_profile(h, t)
+        v = np.array([vx, vy, vz]) + np.array([wind_vx, wind_vy, wind_vz])  # Скорость как вектор
 
         # Получаем силы из PhysicsModel
         F = self.physics_model.forces(h, v, t)

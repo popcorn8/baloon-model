@@ -16,6 +16,5 @@ dt = 0.1  # Шаг интегрирования
 # Запуск симуляции методом Рунге-Кутта
 t, solution_rk5 = simulation.runge_kutta_5(simulation.equations, initial_conditions, time_span, dt)
 
-
 # Построение траекторий
 plotter.plot_trajectory(solution_rk5, t, labels=['X (м)', 'Y (м)', 'Высота (м)'])
