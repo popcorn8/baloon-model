@@ -1,25 +1,24 @@
 import numpy as np
-from constants import G, C_D, AREA, VOLUME, M_TOTAL, T0, RHO_0, B, A
+from constants import G, C_D, AREA, VOLUME, M_TOTAL, T0, R, M, P0, HELLMAN, WIND1
+
 
 class PhysicsModel:
-    def __init__(self):
+    def __init__(self, start_h=1, c_d=C_D, area=AREA, volume=VOLUME, m_total=M_TOTAL, ):
         """Инициализация физической модели."""
-        self.G = G  # Ускорение свободного падения
-        self.C_D = C_D  # Коэффициент сопротивления
-        self.AREA = AREA  # Эффективная площадь
-        self.VOLUME = VOLUME  # Объем тела
-        self.M_TOTAL = M_TOTAL  # Общая масса
-        self.T0 = T0  # Температура на уровне моря (К)
-        self.RHO_0 = RHO_0  # Плотность воздуха на уровне моря (кг/м³)
-        self.B = B  # Коэффициент модели атмосферы
-        self.A = A  # Градиент температуры
+        self.C_D = c_d  # Коэффициент сопротивления
+        self.AREA = area  # Эффективная площадь
+        self.VOLUME = volume  # Объем тела
+        self.M_TOTAL = m_total  # Общая масса
+        self.START_H = start_h  # Начальная высота
+        self.MAX_H = 11000  # Максимальная высота, рассматриваемая в симуляции (м)
 
-    def update_parameters(self, params):
+    def temperature(self, h):
         """
-        Обновляет параметры модели на основе переданных значений.
-        :param params: Список параметров [C_D, AREA, VOLUME, ...].
+        Рассчитывает температуру воздуха на заданной высоте
+        :param h: Высота в м
+        :return: Температура воздуха в К
         """
-        self.C_D, self.AREA, self.VOLUME, self.M_TOTAL = params
+        return T0 - 0.0065 * h
 
     def air_density(self, h):
         """
@@ -27,38 +26,31 @@ class PhysicsModel:
         :param h: Высота в метрах.
         :return: Плотность воздуха в кг/м³.
         """
-        return self.RHO_0 * np.exp((-self.B * h * self.T0) / (self.T0 - self.A * h))
+        # Температура на данной высоте
+        T = self.temperature(h)
+        # Давление на данной высоте - Барометрическая формула
+        p = P0 * np.exp(-(M*G*h) / (R * T))
+        # Уравнение Менделеева-Клапейрона
+        rho = (p*M) / (R*T)
+        return rho
 
-    def wind_profile(self, h, t):
+    def wind_profile(self, h):
         """
-        Рассчитывает параметры ветра на заданной высоте и времени.
+        Рассчитывает параметры ветра на заданной высоте.
+        Для упрощения используется формула для проектирования ветряных турбин
         :param h: Высота в метрах.
-        :param t: Время в секундах.
         :return: Компоненты скорости ветра (vx, vy, vz) в м/с.
         """
-        # Скорость ветра
-        base_speed = 2 + 0.1 * np.log1p(h + 1)
-        turbulence = 0.5 * np.sin(2 * np.pi * t / 600)
-        speed = base_speed + turbulence
+        wind_v = np.zeros(3)
 
-        # Направление ветра
-        base_direction = 45 + 15 * np.sin(2 * np.pi * h / 10000)
-        time_variation = 10 * np.sin(2 * np.pi * t / 1800)
-        direction = base_direction + time_variation
+        # Полагаем что скорость ветра до 1 м равна 0
+        if h > 1:
+            # Для упрощения ветер направлен всегда вдоль оси x
+            wind_v[0] = WIND1 * (h**HELLMAN)
 
-        # Азимутальное направление
-        base_azimuth = 5 * np.sin(2 * np.pi * h / 5000)
-        azimuth_turbulence = 2 * np.cos(2 * np.pi * t / 900)
-        azimuth = base_azimuth + azimuth_turbulence
+        return wind_v
 
-        # Компоненты ветра
-        wind_vx = speed * np.cos(np.radians(direction)) * np.cos(np.radians(azimuth))
-        wind_vy = speed * np.sin(np.radians(direction)) * np.cos(np.radians(azimuth))
-        wind_vz = speed * np.sin(np.radians(azimuth))
-
-        return wind_vx, wind_vy, wind_vz
-
-    def forces(self, h, v, t):
+    def forces(self, h, v):
         """
         Вычисляет силы, действующие на объект.
         :param h: Высота в метрах.
@@ -70,11 +62,11 @@ class PhysicsModel:
 
         # Сила тяжести
         F_G = np.zeros(len(v))
-        F_G[-1] = -(self.M_TOTAL * self.G)
+        F_G[-1] = -(self.M_TOTAL * G)
 
         # Сила Архимеда
         F_A = np.zeros(len(v))
-        F_A[-1] = rho_air * self.VOLUME * self.G
+        F_A[-1] = rho_air * self.VOLUME * G
 
         # Компоненты силы сопротивления
         F_R = 0.5 * rho_air * v ** 2 * self.C_D * self.AREA * (-np.sign(v))
