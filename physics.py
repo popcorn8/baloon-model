@@ -3,14 +3,12 @@ from constants import G, C_D, AREA, VOLUME, M_TOTAL, T0, R, M, P0, HELLMAN, WIND
 
 
 class PhysicsModel:
-    def __init__(self, start_h=1, c_d=C_D, area=AREA, volume=VOLUME, m_total=M_TOTAL, ):
+    def __init__(self, c_d=C_D, area=AREA, volume=VOLUME, m_total=M_TOTAL):
         """Инициализация физической модели."""
         self.C_D = c_d  # Коэффициент сопротивления
         self.AREA = area  # Эффективная площадь
         self.VOLUME = volume  # Объем тела
         self.M_TOTAL = m_total  # Общая масса
-        self.START_H = start_h  # Начальная высота
-        self.MAX_H = 11000  # Максимальная высота, рассматриваемая в симуляции (м)
 
     def temperature(self, h):
         """
@@ -49,6 +47,32 @@ class PhysicsModel:
             wind_v[0] = WIND1 * (h**HELLMAN)
 
         return wind_v
+
+    def air_density_dh(self, h, dh):
+        """
+        Производная плотности воздуха по высоте
+        :param h:
+        :param dh:
+        :return:
+        """
+        air_density = self.air_density(h)
+        air_density_higher = self.air_density(h + dh)
+        if air_density == 0 and air_density_higher == 0 or air_density == air_density_higher:
+            return 0
+        return (air_density_higher - air_density) / dh
+
+    def wind_v_dh(self, h, dh):
+        """
+        Производная скорости ветра по высоте
+        :param h:
+        :param dh:
+        :return:
+        """
+        wind_v = np.linalg.norm(self.wind_profile(h))
+        wind_v_higher = np.linalg.norm(self.wind_profile(h + dh))
+        if wind_v == 0 and wind_v_higher == 0 or wind_v == wind_v_higher:
+            return 0
+        return (wind_v_higher - wind_v) / dh
 
     def forces(self, h, v):
         """

@@ -6,18 +6,21 @@ from physics import PhysicsModel
 
 
 class BalloonSimulation:
-    def __init__(self):
+    def __init__(self, start_h):
         """Инициализация симуляции."""
         self.m_total = M_TOTAL
         self.physics_model = PhysicsModel()  # Экземпляр PhysicsModel
+        self.START_H = start_h  # Начальная высота
+        self.MAX_H = 11000  # Максимальная высота, рассматриваемая в симуляции (м)
 
-    def equations(self, t, y):
+    def equations(self, y, t):
         """Дифференциальные уравнения движения."""
-        x, y, z, vx, vy, vz = y
+        x, y, z, vx, vy, vz, wind_v, air_density = y
         h = z  # Высота равна текущей координате z
         # Учет ветра
         wind_v = self.physics_model.wind_profile(h)
-        v = np.array([vx, vy, vz]) + wind_v  # Скорость как вектор
+        # print(f"WINDV {wind_v}")
+        vx, vy, vz = v = np.array([vx, vy, vz]) + wind_v  # Скорость как вектор
 
         # Получаем силы из PhysicsModel
         F = self.physics_model.forces(h, v)
@@ -25,7 +28,17 @@ class BalloonSimulation:
         dvydt = F[1] / self.m_total
         dvzdt = F[2] / self.m_total
 
-        return np.array([vx, vy, vz, dvxdt, dvydt, dvzdt])
+        # Шаг для численного дифференцирования по высоте
+        dh = vz
+
+        # Производная скорости ветра по высоте
+        dwindt_dh = self.physics_model.wind_v_dh(h, dh)
+        # print(f"DWINDV {wind_v}")
+        # Производная плотности воздуха по высоте
+        dair_density_dh = self.physics_model.air_density_dh(h, dh)
+
+        # Возвращаем изменения координат, скоростей, производные скорости ветра и плотности воздуха
+        return np.array([vx, vy, vz, dvxdt, dvydt, dvzdt, dwindt_dh, dair_density_dh])
 
     def runge_kutta_5(self, equations, initial_conditions, t, dt):
         """
@@ -53,16 +66,10 @@ class BalloonSimulation:
 
         return y
 
-    def run_simulation(self, initial_conditions, time_span, dt):
-        return self.runge_kutta_5(self.equations, initial_conditions, time_span, dt)
+    def run_simulation(self, initial_conditions, time_span):
+        # return self.runge_kutta_5(self.equations, initial_conditions, time_span, dt)
+        return odeint(self.equations, initial_conditions, time_span)
 
-    # TODO: обратную задачу пока нельзя решить, тк нет выборки данных по скорости ветра и плотности воздуха
-    """
-    а эти выборки мы не можем получить, тк данные изменяются в зависимости от высоты по заданным формулам
-    то есть нужно как то добавить в вектор данных dwind_v_dh и drho_air_dh, но тк там у нас переменные зависящие от
-    времени, возможно это будет некорректно
-    ПОКА ХЗ КАК ЭТО РЕШИТЬ
-    """
     def inverse_problem(self):
         """
         Решение обратной задачи: подбор параметров модели для минимизации ошибки между
@@ -70,18 +77,18 @@ class BalloonSimulation:
 
         """
         # Исходные данные
-        time = np.linspace(0, 100, 100)  # Временная сетка
-        x_observed = np.random.rand(100, 3)  # Наблюдаемая траектория (пример)
+        time = np.linspace(0, 1800, 1800)  # Временная сетка
+        x_observed = np.random.rand(len(time), 3)  # Наблюдаемая траектория (пример)
 
         # Функция потерь
         def loss_function(params, x_observed, time):
-            x_calculated = model_trajectory(params, time)
+            x_calculated = self.run_simulation(params, time)[:, :3]
             error = np.linalg.norm(x_observed - x_calculated, axis=1)
             regularization = np.sum(np.gradient(params[:len(time)]) ** 2)  # Регуляризация
             return np.sum(error ** 2) + 0.01 * regularization
 
         # Начальное приближение
-        initial_params = np.random.rand(2 * len(time))  # Плотность и скорость ветра
+        initial_params = np.random.rand(len(time), 2)  # Плотность и скорость ветра
 
         # Оптимизация
         result = minimize(loss_function, initial_params, args=(x_observed, time), method='L-BFGS-B')
@@ -90,3 +97,5 @@ class BalloonSimulation:
         optimized_params = result.x
         rho_optimized = optimized_params[:len(time)]
         vw_optimized = optimized_params[len(time):]
+        print(rho_optimized)
+        print(vw_optimized)
