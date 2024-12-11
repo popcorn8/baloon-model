@@ -21,9 +21,10 @@ class BalloonSimulation:
         wind_v = self.physics_model.wind_profile(h)
         # print(f"WINDV {wind_v}")
         vx, vy, vz = v = np.array([vx, vy, vz]) + wind_v  # Скорость как вектор
-
+        # Плотность воздуха
+        rho_air = self.physics_model.air_density(h)
         # Получаем силы из PhysicsModel
-        F = self.physics_model.forces(h, v)
+        F = self.physics_model.forces(h, v, rho_air)
         dvxdt = F[0] / self.m_total
         dvydt = F[1] / self.m_total
         dvzdt = F[2] / self.m_total
@@ -40,62 +41,84 @@ class BalloonSimulation:
         # Возвращаем изменения координат, скоростей, производные скорости ветра и плотности воздуха
         return np.array([vx, vy, vz, dvxdt, dvydt, dvzdt, dwindt_dh, dair_density_dh])
 
-    def runge_kutta_5(self, equations, initial_conditions, t, dt):
-        """
-        Метод Runge-Kutta 5-го порядка для численного интегрирования.
-
-        :param equations: Функция, представляющая систему уравнений.
-        :param initial_conditions: Начальные условия системы.
-        :param t: Временной интервал.
-        :param dt: Шаг интегрирования.
-        :return: Массив времени и матрица состояний.
-        """
-        # t0, tf = time_span
-        # t = np.arange(t0, tf + dt, dt)  # Массив времени
-        y = np.zeros((len(t), len(initial_conditions)))  # Матрица состояний
-        y[0] = initial_conditions  # Установить начальные условия
-
-        for i in range(len(t) - 1):
-            k1 = dt * equations(t[i], y[i])
-            k2 = dt * equations(t[i] + dt / 4, y[i] + k1 / 4)
-            k3 = dt * equations(t[i] + 3 * dt / 8, y[i] + 3 / 32 * k1 + 9 / 32 * k2)
-            k4 = dt * equations(t[i] + 12 * dt / 13, y[i] + 1932 / 2197 * k1 - 7200 / 2197 * k2 + 7296 / 2197 * k3)
-            k5 = dt * equations(t[i] + dt, y[i] + 439 / 216 * k1 - 8 * k2 + 3680 / 513 * k3 - 845 / 4104 * k4)
-            k6 = dt * equations(t[i] + dt / 2, y[i] - 8 / 27 * k1 + 2 * k2 - 3544 / 2565 * k3 + 1859 / 4104 * k4 - 11 / 40 * k5)
-            y[i + 1] = y[i] + (16 / 135 * k1 + 6656 / 12825 * k3 + 28561 / 56430 * k4 - 9 / 50 * k5 + 2 / 55 * k6)
-
-        return y
-
     def run_simulation(self, initial_conditions, time_span):
-        # return self.runge_kutta_5(self.equations, initial_conditions, time_span, dt)
         return odeint(self.equations, initial_conditions, time_span)
 
-    def inverse_problem(self):
+    def inverse_problem(self, trajectory):
         """
         Решение обратной задачи: подбор параметров модели для минимизации ошибки между
         наблюдаемой и симулированной траекториями.
-
         """
-        # Исходные данные
-        time = np.linspace(0, 1800, 1800)  # Временная сетка
-        x_observed = np.random.rand(len(time), 3)  # Наблюдаемая траектория (пример)
+        # Извлекаем высоты (z-координата) из траектории
+        heights = trajectory[:, 2]
 
-        # Функция потерь
-        def loss_function(params, x_observed, time):
-            x_calculated = self.run_simulation(params, time)[:, :3]
-            error = np.linalg.norm(x_observed - x_calculated, axis=1)
-            regularization = np.sum(np.gradient(params[:len(time)]) ** 2)  # Регуляризация
-            return np.sum(error ** 2) + 0.01 * regularization
+        # Создаем начальные предположения для плотности воздуха и ветра
+        initial_wind_speeds = np.zeros_like(heights)
+        initial_air_densities = np.ones_like(heights) * 1.225  # Начальное значение плотности воздуха на уровне моря
 
-        # Начальное приближение
-        initial_params = np.random.rand(len(time), 2)  # Плотность и скорость ветра
+        # Функция потерь для минимизации разницы между расчетной и реальной траекторией
+        def loss_function(params):
+            wind_speeds = params[:len(heights)]
+            air_densities = params[len(heights):]
 
-        # Оптимизация
-        result = minimize(loss_function, initial_params, args=(x_observed, time), method='L-BFGS-B')
+            # Рассчитываем траекторию заново на основе текущих параметров
+            simulated_trajectory = self.simulate_with_params(wind_speeds, air_densities, heights)
 
-        # Результаты
+            # Ошибка между модельной и реальной траекториями
+            error = np.linalg.norm(simulated_trajectory - trajectory)
+            return error
+
+        # Начальное приближение для параметров
+        initial_params = np.concatenate([initial_wind_speeds, initial_air_densities])
+
+        # Оптимизация параметров с помощью метода наименьших квадратов
+        result = minimize(loss_function, initial_params, method='L-BFGS-B')
+
+        # Извлекаем оптимальные параметры
         optimized_params = result.x
-        rho_optimized = optimized_params[:len(time)]
-        vw_optimized = optimized_params[len(time):]
-        print(rho_optimized)
-        print(vw_optimized)
+        optimized_wind_speeds = optimized_params[:len(heights)]
+        optimized_air_densities = optimized_params[len(heights):]
+
+        return {
+            'wind_speeds': optimized_wind_speeds,
+            'air_densities': optimized_air_densities
+        }
+
+    def simulate_with_params(self, wind_speeds, air_densities, heights):
+        """
+        Симулирует траекторию с заданными профилями ветра и плотности воздуха.
+
+        :param wind_speeds: np.array, массив скоростей ветра на разных высотах.
+        :param air_densities: np.array, массив плотностей воздуха на разных высотах.
+        :return: np.array, рассчитанная траектория (x, y, z) формы (N, 3).
+        """
+        def equations(y, t, wind_speeds, air_densities):
+            """Дифференциальные уравнения движения с учетом заданных параметров."""
+            x, y, z, vx, vy, vz = y
+            h = z  # Высота равна текущей координате z
+
+            # Интерполяция скорости ветра и плотности воздуха по высоте
+            wind_v = np.interp(h, heights, wind_speeds)
+            air_density = np.interp(h, heights, air_densities)
+
+            # Учет ветра
+            vx, vy, vz = v = np.array([vx, vy, vz]) + np.array([wind_v, 0, 0])  # Скорость как вектор
+
+            # Модель сил (пример, замените реальной физической моделью)
+            F = self.physics_model.forces(h, v, air_density)
+            dvxdt = F[0] / self.m_total
+            dvydt = F[1] / self.m_total
+            dvzdt = F[2] / self.m_total
+
+            return np.array([vx, vy, vz, dvxdt, dvydt, dvzdt])
+
+        # Начальные условия
+        initial_conditions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)  # x, y, z, vx, vy, vz
+        time_span = np.linspace(0, len(wind_speeds)-1, len(wind_speeds))
+
+        # Решение системы ОДУ
+        solution = odeint(equations, initial_conditions, time_span, args=(wind_speeds, air_densities))
+
+        # Возвращаем только координаты (x, y, z)
+        return solution[:, :3]
+

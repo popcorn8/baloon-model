@@ -74,7 +74,7 @@ class PhysicsModel:
             return 0
         return (wind_v_higher - wind_v) / dh
 
-    def forces(self, h, v):
+    def forces(self, h, v, rho_air):
         """
         Вычисляет силы, действующие на объект.
         :param h: Высота в метрах.
@@ -82,7 +82,6 @@ class PhysicsModel:
         :param t: Время в секундах.
         :return: Массив сил (по компонентам).
         """
-        rho_air = self.air_density(h)
 
         # Сила тяжести
         F_G = np.zeros(len(v))
