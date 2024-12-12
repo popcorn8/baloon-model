@@ -9,17 +9,22 @@ physics_model = PhysicsModel()
 simulation = BalloonSimulation(0)
 plotter = TrajectoryPlotter()
 
-# Начальные условия
-initial_conditions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, P0], dtype=np.float64)  # x, y, z, vx, vy, vz
-t = np.linspace(0, 1800, 1800)  # Время в секундах (от 0 до 1 часа)
+# Начальные условия для прямой задачи
+initial_conditions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, physics_model.air_density(0)], dtype=np.float64)  # x, y, z, vx, vy, vz
+T_max = 1000
+t = np.linspace(0, T_max, T_max)  # Время в секундах (от 0 до T_max)
 # dt = 0.1  # Шаг интегрирования
 
 # Запуск симуляции
 solution = simulation.run_simulation(initial_conditions, t)
 # print(solution[:, -2])
 
+
+# Начальные условия для обратной задачи
+observed_trajectory = solution[:, :3]
 # Обратная задача
-simulation.inverse_problem(solution[:, :3])
+result = simulation.inverse_problem(solution[:, :3])
 
 # Построение траекторий
-plotter.plot_trajectory(solution, t)
+plotter.plot_trajectory(solution, result, t)
+

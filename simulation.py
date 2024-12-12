@@ -1,8 +1,9 @@
 import numpy as np
 from scipy.integrate import odeint
-from scipy.optimize import minimize
+from scipy.optimize import least_squares
 from constants import M_TOTAL
 from physics import PhysicsModel
+import matplotlib.pyplot as plt
 
 
 class BalloonSimulation:
@@ -42,47 +43,48 @@ class BalloonSimulation:
         return np.array([vx, vy, vz, dvxdt, dvydt, dvzdt, dwindt_dh, dair_density_dh])
 
     def run_simulation(self, initial_conditions, time_span):
-        return odeint(self.equations, initial_conditions, time_span)
+        solution = np.array(odeint(self.equations, initial_conditions, time_span))
+        coords_noise = np.random.normal(0, 0.1, solution[:, :3].shape)
+        solution[:, :3] += coords_noise
+        return solution
 
-    def inverse_problem(self, trajectory):
+    def inverse_problem(self, observed_trajectory):
         """
-        Решение обратной задачи: подбор параметров модели для минимизации ошибки между
-        наблюдаемой и симулированной траекториями.
+        Решает обратную задачу методом наименьших квадратов.
+
+        :param observed_trajectory: np.array, наблюдаемая траектория (x, y, z) формы (N, 3).
+        :return: tuple (оптимальные скорости ветра, оптимальные плотности воздуха).
         """
-        # Извлекаем высоты (z-координата) из траектории
-        heights = trajectory[:, 2]
+        heights = observed_trajectory[:, 2]
+        initial_wind_speeds = 0
+        initial_air_densities = 100000
 
-        # Создаем начальные предположения для плотности воздуха и ветра
-        initial_wind_speeds = np.zeros_like(heights)
-        initial_air_densities = np.ones_like(heights) * 1.225  # Начальное значение плотности воздуха на уровне моря
+        def error_func(params):
+            # Разделяем параметры на скорости ветра и плотности воздуха
+            wind_speeds = params[0]
+            air_densities = params[1]
 
-        # Функция потерь для минимизации разницы между расчетной и реальной траекторией
-        def loss_function(params):
-            wind_speeds = params[:len(heights)]
-            air_densities = params[len(heights):]
+            # Симуляция траектории с текущими параметрами
+            simulated_trajectory = self.simulate_with_params(wind_speeds, air_densities, heights)[:, :3]
 
-            # Рассчитываем траекторию заново на основе текущих параметров
-            simulated_trajectory = self.simulate_with_params(wind_speeds, air_densities, heights)
-
-            # Ошибка между модельной и реальной траекториями
-            error = np.linalg.norm(simulated_trajectory - trajectory)
+            # Вычисляем разницу между наблюдаемой и симулированной траекториями
+            error = np.linalg.norm(simulated_trajectory - observed_trajectory) ** 2
+            # print(f"Error: {error}")
             return error
 
-        # Начальное приближение для параметров
-        initial_params = np.concatenate([initial_wind_speeds, initial_air_densities])
+        # Начальные параметры для оптимизации
+        initial_params = np.array([initial_wind_speeds, initial_air_densities])
 
-        # Оптимизация параметров с помощью метода наименьших квадратов
-        result = minimize(loss_function, initial_params, method='L-BFGS-B')
+        # Решение задачи минимизации
+        result = least_squares(error_func, initial_params)
 
         # Извлекаем оптимальные параметры
-        optimized_params = result.x
-        optimized_wind_speeds = optimized_params[:len(heights)]
-        optimized_air_densities = optimized_params[len(heights):]
+        optimized_wind_speeds = result.x[0]
+        optimized_air_densities = result.x[1]
 
-        return {
-            'wind_speeds': optimized_wind_speeds,
-            'air_densities': optimized_air_densities
-        }
+        result = self.simulate_with_params(optimized_wind_speeds, optimized_air_densities, heights)
+
+        return result
 
     def simulate_with_params(self, wind_speeds, air_densities, heights):
         """
@@ -90,19 +92,23 @@ class BalloonSimulation:
 
         :param wind_speeds: np.array, массив скоростей ветра на разных высотах.
         :param air_densities: np.array, массив плотностей воздуха на разных высотах.
+        :param heights: np.array, массив высот для интерполяции.
         :return: np.array, рассчитанная траектория (x, y, z) формы (N, 3).
         """
-        def equations(y, t, wind_speeds, air_densities):
+        self.physics_model.WIND1 = wind_speeds
+        self.physics_model.P0 = air_densities
+
+        def equations(y, t):
             """Дифференциальные уравнения движения с учетом заданных параметров."""
-            x, y, z, vx, vy, vz = y
+            x, y, z, vx, vy, vz, wind_v, air_density = y
             h = z  # Высота равна текущей координате z
 
-            # Интерполяция скорости ветра и плотности воздуха по высоте
-            wind_v = np.interp(h, heights, wind_speeds)
-            air_density = np.interp(h, heights, air_densities)
+            # Рассчет скорости ветра и плотности воздуха по высоте относительно заданных начальных параметров
+            wind_v = self.physics_model.wind_profile(h)
+            air_density = self.physics_model.air_density(h)
 
             # Учет ветра
-            vx, vy, vz = v = np.array([vx, vy, vz]) + np.array([wind_v, 0, 0])  # Скорость как вектор
+            vx, vy, vz = v = np.array([vx, vy, vz]) + wind_v  # Скорость как вектор
 
             # Модель сил (пример, замените реальной физической моделью)
             F = self.physics_model.forces(h, v, air_density)
@@ -110,15 +116,35 @@ class BalloonSimulation:
             dvydt = F[1] / self.m_total
             dvzdt = F[2] / self.m_total
 
-            return np.array([vx, vy, vz, dvxdt, dvydt, dvzdt])
+            # Шаг для численного дифференцирования по высоте
+            dh = vz
+
+            # Производная скорости ветра по высоте
+            dwindt_dh = self.physics_model.wind_v_dh(h, dh)
+            # print(f"DWINDV {wind_v}")
+            # Производная плотности воздуха по высоте
+            dair_density_dh = self.physics_model.air_density_dh(h, dh)
+
+            return np.array([vx, vy, vz, dvxdt, dvydt, dvzdt, dwindt_dh, dair_density_dh])
 
         # Начальные условия
-        initial_conditions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)  # x, y, z, vx, vy, vz
-        time_span = np.linspace(0, len(wind_speeds)-1, len(wind_speeds))
+        initial_conditions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, self.physics_model.air_density(0)], dtype=np.float64)  # x, y, z, vx, vy, vz
+        time_span = np.linspace(0, len(heights)-1, len(heights))
 
         # Решение системы ОДУ
-        solution = odeint(equations, initial_conditions, time_span, args=(wind_speeds, air_densities))
+        solution, info = odeint(equations, initial_conditions, time_span, full_output=True)
+        #
+        # fig = plt.figure(1, (5, 5))
+        # ax = fig.add_subplot(111, projection='3d')
+        # ax.plot(solution[:, 0], solution[:, 1], solution[:, 2], label='Траектория')
+        # x_max = np.max(np.abs(solution[:, 0]))
+        # plt.ylim(-x_max, x_max)
+        # ax.set_xlabel('X (м)')
+        # ax.set_ylabel('Y (м)')
+        # ax.set_zlabel('Высота (м)')
+        # plt.grid(True)
+        # ax.legend()
+        # plt.show()
 
         # Возвращаем только координаты (x, y, z)
-        return solution[:, :3]
-
+        return solution
