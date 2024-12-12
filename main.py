@@ -19,9 +19,15 @@ t = np.linspace(0, T_max, T_max)  # Время в секундах (от 0 до 
 solution = simulation.run_simulation(initial_conditions, t)
 # print(solution[:, -2])
 
-# Обратная задача
-simulation.inverse_problem(solution[:, :3])
+# Запуск обратной задачи
+results = simulation.inverse_problem(solution[:, :3])
+
+
 
 # Построение траекторий
 plotter.plot_trajectory(solution, t)
+
+# Построение графиков
+plotter.plot_trajectory_inverse(results["reconstructed_trajectory"])
+plotter.plot_inverse_results(solution[:, 2], results['wind_speeds'], results['air_densities'])
 

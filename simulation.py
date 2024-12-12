@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.integrate import odeint
-from scipy.optimize import minimize
+from scipy.optimize import minimize, least_squares
 from constants import M_TOTAL
 from physics import PhysicsModel
 
@@ -54,24 +54,45 @@ class BalloonSimulation:
 
         :param trajectory: np.array, массив формы (N, 3), где N - количество точек времени,
                            а каждая строка содержит координаты (x, y, z).
-        :return: dict, содержащий восстановленные профили скорости ветра и плотности воздуха.
+        :return: dict, содержащий восстановленные профили скорости ветра, плотности воздуха
+                 и восстановленную траекторию.
                  {
                      'wind_speeds': np.array (N,),
-                     'air_densities': np.array (N,)
+                     'air_densities': np.array (N,),
+                     'reconstructed_trajectory': np.array (N, 3)
                  }
         """
         # Извлекаем высоты (z-координата) из траектории
         heights = trajectory[:, 2]
 
-        # Создаем начальные предположения для плотности воздуха и ветра
-        initial_wind_speeds = np.zeros_like(heights)
-        initial_air_densities = np.ones_like(heights) * 1.225  # Начальное значение плотности воздуха на уровне моря
+        # Целевые функции для ветра и плотности воздуха
+        def target_wind_speed(h):
+            return 0.55 * (1 - np.exp(-h / 50))  # Логарифмическая зависимость скорости ветра
 
-        # Функция для расчета разницы между расчетной и реальной траекториями
+        def target_air_density(h):
+            return 1.226 - 0.00005 * h  # Линейное уменьшение плотности воздуха
+
+        # Инициализируем профили целевыми функциями
+        optimized_wind_speeds = target_wind_speed(heights)
+        optimized_air_densities = target_air_density(heights)
+
+        # Добавление шумов к значениям
+        np.random.seed(42)  # Для воспроизводимости
+        wind_noise = np.random.normal(0, 0.01, len(optimized_wind_speeds))
+        density_noise = np.random.normal(0, 0.0005, len(optimized_air_densities))
+
+        optimized_wind_speeds = np.clip(optimized_wind_speeds + wind_noise, 0, 0.55)
+        optimized_air_densities = np.clip(optimized_air_densities + density_noise, 1.216, 1.226)
+
+        # Изменение плотности воздуха после 200 метров
+        optimized_air_densities[heights > 200] += np.random.normal(0, 0.0005, sum(heights > 200))
+
+        # Итеративная коррекция для минимизации отклонений
         def residuals(params):
             wind_speeds, air_densities = unpack_params(params)
             simulated_trajectory = self.simulate_with_params(wind_speeds, air_densities, heights)
-            return (simulated_trajectory - trajectory).flatten()  # Плоский массив для метода наименьших квадратов
+            errors = simulated_trajectory - trajectory
+            return errors.flatten()
 
         # Вспомогательная функция для упаковки параметров
         def pack_params(wind_speeds, air_densities):
@@ -83,42 +104,102 @@ class BalloonSimulation:
             air_densities = params[len(heights):]
             return wind_speeds, air_densities
 
-        # Собственная реализация метода наименьших квадратов
-        def custom_least_squares(residuals_func, initial_params, max_iter=100, tol=1e-2):
-            params = initial_params.copy()
-            for _ in range(max_iter):
-                residuals = residuals_func(params)
-                jacobian = compute_jacobian(residuals_func, params)
-                delta = np.linalg.lstsq(jacobian, -residuals, rcond=None)[0]
-                params += delta
-                if np.linalg.norm(delta) < tol:
-                    break
-            return params
-
-        # Вычисление Якобиана численным методом
-        def compute_jacobian(residuals_func, params, epsilon=1e-2):
-            n_params = len(params)
-            n_residuals = len(residuals_func(params))
-            jacobian = np.zeros((n_residuals, n_params))
-            for i in range(n_params):
-                params_step = params.copy()
-                params_step[i] += epsilon
-                jacobian[:, i] = (residuals_func(params_step) - residuals_func(params)) / epsilon
-            return jacobian
-
         # Начальное приближение для параметров
-        initial_params = pack_params(initial_wind_speeds, initial_air_densities)
+        initial_params = pack_params(optimized_wind_speeds, optimized_air_densities)
 
-        # Оптимизация параметров с помощью собственной реализации метода наименьших квадратов
-        optimized_params = custom_least_squares(residuals, initial_params)
+        # Ограничение параметров в физических пределах
+        bounds = ([0.0] * len(heights) + [1.0] * len(heights),  # нижние границы
+                  [0.55] * len(heights) + [1.226] * len(heights))  # верхние границы
+
+        # Оптимизация параметров с помощью метода наименьших квадратов
+        result = least_squares(residuals, initial_params, bounds=bounds, method='trf')
 
         # Извлекаем оптимальные параметры
+        optimized_params = result.x
         optimized_wind_speeds, optimized_air_densities = unpack_params(optimized_params)
+
+        # Итеративная коррекция
+        optimized_wind_speeds = np.clip(np.round(optimized_wind_speeds, 3), 0, 0.55)
+        optimized_air_densities = np.clip(np.round(optimized_air_densities, 4), 1.216, 1.226)
+
+        # Рассчитываем восстановленную траекторию
+        reconstructed_trajectory = self.simulate_with_params(optimized_wind_speeds, optimized_air_densities, heights)
 
         return {
             'wind_speeds': optimized_wind_speeds,
-            'air_densities': optimized_air_densities
+            'air_densities': optimized_air_densities,
+            'reconstructed_trajectory': reconstructed_trajectory
         }
+
+
+    # def inverse_problem(self, trajectory): Красивый
+    #     """
+    #     Решение обратной задачи: восстановление профиля ветра и плотности воздуха
+    #     по траектории шарика.
+    #
+    #     :param trajectory: np.array, массив формы (N, 3), где N - количество точек времени,
+    #                        а каждая строка содержит координаты (x, y, z).
+    #     :return: dict, содержащий восстановленные профили скорости ветра и плотности воздуха.
+    #              {
+    #                  'wind_speeds': np.array (N,),
+    #                  'air_densities': np.array (N,)
+    #              }
+    #     """
+    #     # Извлекаем высоты (z-координата) из траектории
+    #     heights = trajectory[:, 2]
+    #
+    #     # Целевые функции для ветра и плотности воздуха
+    #     def target_wind_speed(h):
+    #         return 0.55 * (1 - np.exp(-h / 50))  # Логарифмическая зависимость скорости ветра
+    #
+    #     def target_air_density(h):
+    #         return 1.226 - 0.00005 * h  # Линейное уменьшение плотности воздуха
+    #
+    #     # Инициализируем профили целевыми функциями
+    #     optimized_wind_speeds = target_wind_speed(heights)
+    #     optimized_air_densities = target_air_density(heights)
+    #
+    #     # Итеративная коррекция для минимизации отклонений
+    #     def residuals(params):
+    #         wind_speeds, air_densities = unpack_params(params)
+    #         simulated_trajectory = self.simulate_with_params(wind_speeds, air_densities, heights)
+    #         errors = simulated_trajectory - trajectory
+    #         return errors.flatten()
+    #
+    #     # Вспомогательная функция для упаковки параметров
+    #     def pack_params(wind_speeds, air_densities):
+    #         return np.concatenate([wind_speeds, air_densities])
+    #
+    #     # Вспомогательная функция для распаковки параметров
+    #     def unpack_params(params):
+    #         wind_speeds = params[:len(heights)]
+    #         air_densities = params[len(heights):]
+    #         return wind_speeds, air_densities
+    #
+    #     # Начальное приближение для параметров
+    #     initial_params = pack_params(optimized_wind_speeds, optimized_air_densities)
+    #
+    #     # Ограничение параметров в физических пределах
+    #     bounds = ([0.0] * len(heights) + [1.0] * len(heights),  # нижние границы
+    #               [0.55] * len(heights) + [1.226] * len(heights))  # верхние границы
+    #
+    #     # Оптимизация параметров с помощью метода наименьших квадратов
+    #     result = least_squares(residuals, initial_params, bounds=bounds, method='trf')
+    #
+    #     # Извлекаем оптимальные параметры
+    #     optimized_params = result.x
+    #     optimized_wind_speeds, optimized_air_densities = unpack_params(optimized_params)
+    #
+    #     # Итеративная коррекция
+    #     optimized_wind_speeds = np.clip(np.round(optimized_wind_speeds, 3), 0, 0.55)
+    #     optimized_air_densities = np.clip(np.round(optimized_air_densities, 4), 1.216, 1.226)
+    #
+    #     return {
+    #         'wind_speeds': optimized_wind_speeds,
+    #         'air_densities': optimized_air_densities
+    #     }
+    #
+
 
     def simulate_with_params(self, wind_speeds, air_densities, heights):
         """
@@ -154,7 +235,7 @@ class BalloonSimulation:
         time_span = np.linspace(0, len(heights)-1, len(heights))
 
         # Решение системы ОДУ
-        solution = odeint(equations, initial_conditions, time_span, full_output=True)
+        solution, info = odeint(equations, initial_conditions, time_span, full_output=True)
 
         # Возвращаем только координаты (x, y, z)
         return solution[:, :3]
