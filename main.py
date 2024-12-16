@@ -13,7 +13,6 @@ plotter = TrajectoryPlotter()
 initial_conditions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, physics_model.air_density(0)], dtype=np.float64)  # x, y, z, vx, vy, vz
 T_max = 100
 t = np.linspace(0, T_max, T_max)  # Время в секундах (от 0 до T_max)
-# dt = 0.1 # Шаг интегрирования
 
 # Запуск симуляции
 solution = simulation.run_simulation(initial_conditions, t)
