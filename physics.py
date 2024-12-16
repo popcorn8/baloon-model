@@ -3,14 +3,12 @@ from constants import G, C_D, AREA, VOLUME, M_TOTAL, T0, R, M, P0, HELLMAN, WIND
 
 
 class PhysicsModel:
-    def __init__(self, c_d=C_D, area=AREA, volume=VOLUME, m_total=M_TOTAL, wind1=WIND1, p0=P0):
+    def __init__(self, c_d=C_D, area=AREA, volume=VOLUME, m_total=M_TOTAL):
         """Инициализация физической модели."""
         self.C_D = c_d  # Коэффициент сопротивления
         self.AREA = area  # Эффективная площадь
         self.VOLUME = volume  # Объем тела
         self.M_TOTAL = m_total  # Общая масса
-        self.WIND1 = wind1
-        self.P0 = p0
 
     def temperature(self, h):
         """
@@ -29,7 +27,7 @@ class PhysicsModel:
         # Температура на данной высоте
         T = self.temperature(h)
         # Давление на данной высоте - Барометрическая формула
-        p = self.P0 * np.exp(-(M*G*h) / (R * T))
+        p = P0 * np.exp(-(M*G*h) / (R * T))
         # Уравнение Менделеева-Клапейрона
         rho = (p*M) / (R*T)
         return rho
@@ -46,7 +44,7 @@ class PhysicsModel:
         # Полагаем что скорость ветра до 1 м равна 0
         if h > 1:
             # Для упрощения ветер направлен всегда вдоль оси x
-            wind_v[0] = self.WIND1 * (h**HELLMAN)
+            wind_v[0] = WIND1 * (h**HELLMAN)
 
         return wind_v
 
