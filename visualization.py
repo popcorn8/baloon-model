@@ -3,7 +3,7 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 
 class TrajectoryPlotter:
-    def __init__(self, figsize=(15, 6)):
+    def __init__(self, figsize=(16, 9)):
         """
         Инициализация объекта для построения графиков траектории.
         :param figsize: Размер фигуры графика (ширина, высота).
@@ -43,7 +43,7 @@ class TrajectoryPlotter:
         ax.legend()
 
         ax = fig.add_subplot(234, projection='3d')
-        ax.plot(result[:, 0], result[:, 1], result[:, 2], label='Оптимизированная раектория')
+        ax.plot(result[:, 0], result[:, 1], result[:, 2], label='Оптимизированная траектория')
         x_max = np.max(np.abs(result[:, 0]))
         plt.ylim(-x_max, x_max)
         ax.set_xlabel('X (м)')

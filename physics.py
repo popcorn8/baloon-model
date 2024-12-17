@@ -76,12 +76,11 @@ class PhysicsModel:
             return 0
         return (wind_v_higher - wind_v) / dh
 
-    def forces(self, h, v, rho_air):
+    def forces(self, v, rho_air):
         """
         Вычисляет силы, действующие на объект.
-        :param h: Высота в метрах.
         :param v: Скорость объекта (массив компонентов).
-        :param t: Время в секундах.
+        :param rho_air: Текущая плотность воздуха.
         :return: Массив сил (по компонентам).
         """
 
